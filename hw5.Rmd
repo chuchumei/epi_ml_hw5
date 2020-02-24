@@ -45,24 +45,15 @@ data =
   select(-id) %>%
   arrange(alc_consumption)
 
-data3 = 
-  read_csv('./data/alcohol_use.csv') %>% 
-  rename(id = X1) %>% 
-  mutate(alc_consumption = case_when(alc_consumption == 'CurrentUse' ~ 1,
-                                      alc_consumption == 'NotCurrentUse' ~ 0),
-         alc_consumption = as.factor(alc_consumption)) %>% 
-  select(-id) %>% 
-  arrange(alc_consumption)
-
-data2 = 
-  read_csv('./data/alcohol_use.csv') %>% 
-  rename(id = X1) %>% 
-  mutate(alc_consumption = case_when(alc_consumption == 'CurrentUse' ~ 1,
-                                      alc_consumption == 'NotCurrentUse' ~ 0),
-         alc_consumption2 = alc_consumption,
-         alc_consumption = as.factor(alc_consumption)) %>% 
-  select(-id) %>% 
-  arrange(alc_consumption)
+# data2 = 
+#   read_csv('./data/alcohol_use.csv') %>% 
+#   rename(id = X1) %>% 
+#   mutate(alc_consumption = case_when(alc_consumption == 'CurrentUse' ~ 1,
+#                                       alc_consumption == 'NotCurrentUse' ~ 0),
+#          alc_consumption2 = alc_consumption,
+#          alc_consumption = as.factor(alc_consumption)) %>% 
+#   select(-id) %>% 
+#   arrange(alc_consumption)
   
 ```
 
@@ -81,7 +72,7 @@ set.seed(1)
 
 ## creating training/testing
 train_ind =
-  createDataPartition(data2$alc_consumption,
+  createDataPartition(data$alc_consumption,
                       p = 0.7, 
                       list = FALSE)
 
@@ -92,13 +83,13 @@ test = data[-train_ind, ]
 
 ## below - for glmnet (vectors and matrices)
 
-## response vectors
-y_train = data2[train_ind, ]$alc_consumption2
-y_test = data2[-train_ind, ]$alc_consumption2
-
-## predictor matrices
-x_train = model.matrix(alc_consumption~., data2[train_ind, ])[,-1]
-x_test = model.matrix(alc_consumption~., data2[-train_ind, ])[,-1]
+# ## response vectors
+# y_train = data2[train_ind, ]$alc_consumption2
+# y_test = data2[-train_ind, ]$alc_consumption2
+# 
+# ## predictor matrices
+# x_train = model.matrix(alc_consumption~., data2[train_ind, ])[,-1]
+# x_test = model.matrix(alc_consumption~., data2[-train_ind, ])[,-1]
 
 ```
 
@@ -118,7 +109,8 @@ elastic_model =
   train(alc_consumption ~., 
         data = train,
         method = "glmnet", 
-        trControl = trainControl("cv", number = 10), 
+        trControl = trainControl("cv", 
+                                 number = 10), 
         tuneGrid = expand.grid(alpha = alpha, 
                                lambda = lambda)
   )
@@ -157,7 +149,8 @@ elastic_model$bestTune %>%
 logistic_model =
   glm(alc_consumption ~.,
       data = train,
-      family = binomial(link = "logit")
+      family = binomial(link = "logit"),
+      trainControl(classProbs = TRUE)
       )
 
 logistic_model %>% broom::tidy()
@@ -175,7 +168,8 @@ lasso_model =
   train(alc_consumption ~.,
         data = train,
         method = "glmnet",
-        trControl = trainControl("cv", number = 10, classProbs = TRUE),
+        trControl = trainControl("cv", 
+                                 number = 10),
         tuneGrid = expand.grid(alpha = 1,
                                lambda = 10^seq(-1, -0.5, length = 100))
   )
@@ -215,5 +209,54 @@ Let's compare the accuracy of our three models:
 ## look at previous week of ML R code to see what she did for logistic accuracy 
 ## compare accuracy
 ## pick model, justify
+set.seed(1)
+
+test_outcome =
+  as.numeric(test$alc_consumption) - 1               ## minus 1 changes from 1/2 to 0/1
+
+fit_elastic =
+  predict(elastic_model, test, type = 'prob') %>% 
+  select(-NotCurrentUse) %>% 
+  mutate(elastic_pred = case_when(CurrentUse > .5 ~ 1,
+                          TRUE ~ 0),
+         outcome = test_outcome)
+
+elastic_accuracy = 
+  fit_elastic %>% 
+  mutate(misclass_err = case_when(elastic_pred != outcome ~ 1,
+                                  TRUE ~ 0)) %>% 
+  summarize(Accuracy = 1 - mean(misclass_err))
+
+fit_logistic =
+  predict(logistic_model, test, type = 'response') %>% 
+  as.data.frame() %>% 
+  rename(CurrentUse = '.') %>% 
+  mutate(logistic_pred = case_when(CurrentUse > .5 ~ 1,
+                         TRUE ~ 0),
+         outcome = test_outcome)
+
+logistic_accuracy = 
+  fit_logistic %>% 
+  mutate(misclass_err = case_when(logistic_pred != outcome ~ 1,
+                                  TRUE ~ 0)) %>% 
+  summarize(Accuracy = 1 - mean(misclass_err))
+
+fit_lasso =
+  predict(lasso_model, test, type = 'prob') %>% 
+  select(-NotCurrentUse) %>% 
+  mutate(lasso_pred = case_when(CurrentUse > .5 ~ 1,
+                                TRUE ~ 0),
+         outcome = test_outcome)
+
+lasso_accuracy = 
+  fit_lasso %>% 
+  mutate(misclass_err = case_when(lasso_pred != outcome ~ 1,
+                                  TRUE ~ 0)) %>% 
+  summarize(Accuracy = 1 - mean(misclass_err))
+
+bind_cols(elastic_accuracy, logistic_accuracy, lasso_accuracy) %>% 
+  rename(Elastic = Accuracy, Logistic = Accuracy1, LASSO = Accuracy2) %>% 
+  knitr::kable()
+
 
 ```

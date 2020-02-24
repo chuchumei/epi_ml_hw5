@@ -1,0 +1,219 @@
+---
+title: "Homework 5"
+author: "Will Simmons"
+date: "2/25/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Instructions for Assignment
+
+Goal: You want to predict current alcohol consumption but it is expensive and time-consuming to administer all of the behavioral testing that produces the personality scores. You will conduct a reproducible analysis to build and test classification models using regularized logistic regression and traditional logistic regression.
+
+Address the following:
+
+  1. You should create and compare three different models: (a) a model that chooses alpha and lambda via cross-validation using all of the features; (b) a model that uses all the features and traditional logistic regression; and (c) a lasso model using all of the features.
+  2. You should compare the performance of all three models within the test set and then decide which model you would choose as your final model. Provide justification for your choice.
+  3. Produce a shareable report of your analysis and results using R Markdown.
+  4. What research questions could this analysis either a) directly address or b) indirectly help to address by providing information that could be used in subsequent analyses?
+
+
+# Part 0
+*Setup, Import, Clean*
+
+I'll set up my session with necessary libraries...
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readr)
+library(Amelia)
+library(caret)
+library(modelr)
+library(glmnet)
+```
+
+And import the data.
+
+```{r import}
+
+# need to reformat outcome = 0/1)
+data =
+  read_csv('./data/alcohol_use.csv') %>%
+  rename(id = X1) %>%
+  mutate(alc_consumption = as.factor(alc_consumption),
+         alc_consumption = fct_relevel(alc_consumption, "NotCurrentUse")) %>%   ## makes NotCurrentUse reference category
+  select(-id) %>%
+  arrange(alc_consumption)
+
+data3 = 
+  read_csv('./data/alcohol_use.csv') %>% 
+  rename(id = X1) %>% 
+  mutate(alc_consumption = case_when(alc_consumption == 'CurrentUse' ~ 1,
+                                      alc_consumption == 'NotCurrentUse' ~ 0),
+         alc_consumption = as.factor(alc_consumption)) %>% 
+  select(-id) %>% 
+  arrange(alc_consumption)
+
+data2 = 
+  read_csv('./data/alcohol_use.csv') %>% 
+  rename(id = X1) %>% 
+  mutate(alc_consumption = case_when(alc_consumption == 'CurrentUse' ~ 1,
+                                      alc_consumption == 'NotCurrentUse' ~ 0),
+         alc_consumption2 = alc_consumption,
+         alc_consumption = as.factor(alc_consumption)) %>% 
+  select(-id) %>% 
+  arrange(alc_consumption)
+  
+```
+
+# Part 1
+You should create and compare three different models: 
+  
+  * a model that chooses alpha and lambda via cross-validation using all of the features; 
+  * a model that uses all the features and traditional logistic regression; and 
+  * a lasso model using all of the features.
+
+### Pre-prep: creating training and testing sets
+
+```{r partition}
+
+set.seed(1)
+
+## creating training/testing
+train_ind =
+  createDataPartition(data2$alc_consumption,
+                      p = 0.7, 
+                      list = FALSE)
+
+
+## DFs for caret
+train = data[train_ind, ]
+test = data[-train_ind, ]
+
+## below - for glmnet (vectors and matrices)
+
+## response vectors
+y_train = data2[train_ind, ]$alc_consumption2
+y_test = data2[-train_ind, ]$alc_consumption2
+
+## predictor matrices
+x_train = model.matrix(alc_consumption~., data2[train_ind, ])[,-1]
+x_test = model.matrix(alc_consumption~., data2[-train_ind, ])[,-1]
+
+```
+
+### 1a: Creating model: Choosing alpha and lambda via CV using all features (elastic net)
+
+```{r 1a}
+set.seed(1)
+
+## Create grid to search lambda and alpha
+lambda = 10^seq(-3, 0.5, length = 100)
+alpha = seq(0, 1, length = 20)
+
+set.seed(1)
+
+## training model tuning parameters using CV
+elastic_model = 
+  train(alc_consumption ~., 
+        data = train,
+        method = "glmnet", 
+        trControl = trainControl("cv", number = 10), 
+        tuneGrid = expand.grid(alpha = alpha, 
+                               lambda = lambda)
+  )
+
+## can't use glmnet() to optimize both alpha and lambda simultaneously, it seems
+
+```
+
+As we can see from the plot below, alpha is optimized in one of the green lines (alpha = 0.3-0.5) and lambda is optimized around 0.5.
+
+```{r 1a_plot}
+
+ggplot(elastic_model,
+       highlight = TRUE)
+
+```
+
+We can see the exact optimized tuning parameters in the table below:
+
+```{r best_tune}
+
+set.seed(1)
+
+elastic_model$bestTune %>% 
+  as_tibble() %>% 
+  select(alpha, lambda) %>% 
+  knitr::kable()
+
+```
+
+
+### 1b: Creating model: All features, traditional logistic regression
+
+```{r 1b}
+
+logistic_model =
+  glm(alc_consumption ~.,
+      data = train,
+      family = binomial(link = "logit")
+      )
+
+logistic_model %>% broom::tidy()
+
+```
+
+Since there are no tuning parameters for a logistic model, we'll just assess this for accuracy against the other models below.
+
+### 1c: Creating model: LASSO using all features
+
+```{r lasso}
+set.seed(1)
+
+lasso_model =
+  train(alc_consumption ~.,
+        data = train,
+        method = "glmnet",
+        trControl = trainControl("cv", number = 10, classProbs = TRUE),
+        tuneGrid = expand.grid(alpha = 1,
+                               lambda = 10^seq(-1, -0.5, length = 100))
+  )
+## comparing against glmnet()
+# lasso_model2 = 
+#   glmnet(x_train, y_train,
+#          standardize = TRUE,
+#          alpha = 1,
+#          lambda = 10^seq(-1, -0.5, length = 100))
+
+```
+
+As we can see by plotting the cross-validated accuracy against a range of regularization parameters (lambda), the maximum accuracy is achieved somewhere around exp(-1.6).
+
+```{r lasso_plot}
+plot(lasso_model, xTrans = function(x) log(x))
+```
+
+Indeed, when we extract the optimized lambda value, we see that it's located within that maximum range of the plot above.
+
+```{r lasso_bestfit}
+
+lasso_model$bestTune %>% 
+  as_tibble() %>% 
+  select(lambda) %>% 
+  knitr::kable()
+
+```
+
+# Part 2
+You should compare the performance of all three models within the test set and then decide which model you would choose as your final model. Provide justification for your choice.
+
+Let's compare the accuracy of our three models:
+
+```{r}
+
+## look at previous week of ML R code to see what she did for logistic accuracy 
+## compare accuracy
+## pick model, justify
+
+```

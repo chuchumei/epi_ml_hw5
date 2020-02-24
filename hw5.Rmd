@@ -2,7 +2,7 @@
 title: "Homework 5"
 author: "Will Simmons"
 date: "2/25/2020"
-output: html_document
+output: word_document
 editor_options: 
   chunk_output_type: console
 ---
@@ -173,6 +173,7 @@ lasso_model =
         tuneGrid = expand.grid(alpha = 1,
                                lambda = 10^seq(-1, -0.5, length = 100))
   )
+
 ## comparing against glmnet()
 # lasso_model2 = 
 #   glmnet(x_train, y_train,
@@ -202,10 +203,9 @@ lasso_model$bestTune %>%
 # Part 2
 You should compare the performance of all three models within the test set and then decide which model you would choose as your final model. Provide justification for your choice.
 
-Let's compare the accuracy of our three models:
+I'll calculate the accuracy of our three models using the test dataset:
 
-```{r}
-
+```{r accuracy}
 ## look at previous week of ML R code to see what she did for logistic accuracy 
 ## compare accuracy
 ## pick model, justify
@@ -253,10 +253,41 @@ lasso_accuracy =
   mutate(misclass_err = case_when(lasso_pred != outcome ~ 1,
                                   TRUE ~ 0)) %>% 
   summarize(Accuracy = 1 - mean(misclass_err))
+```
 
+As we can see from the table below, Model #1 (Elastic Net) and Model #3 (LASSO) have identical accuracy values.
+
+```{r accuracy_tbl}
 bind_cols(elastic_accuracy, logistic_accuracy, lasso_accuracy) %>% 
   rename(Elastic = Accuracy, Logistic = Accuracy1, LASSO = Accuracy2) %>% 
   knitr::kable()
 
+```
+
+This is likely the case because, in this random partition and CV set, both the Elastic and LASSO models selected only one feature: `impulsiveness_score`. We can see this by looking at the models' variable importance scores:
+
+```{r coefs}
+
+varImp(lasso_model)[[1]] %>% 
+  knitr::kable(col.names = "LASSO Importance")
+
+varImp(elastic_model)[[1]] %>% 
+  knitr::kable(col.names = "Elastic Importance")
+
+varImp(logistic_model) %>% 
+  knitr::kable(col.names = "Logistic Importance")
 
 ```
+
+Since Elastic and LASSO have identical accuracy in the test set, I will choose the LASSO, given its simplicity relative to the Elastic model (i.e. alpha is fixed in LASSO, whereas it must be tuned in Elastic Net). 
+
+# Part 3
+What research questions could this analysis either a) directly address or b) indirectly help to address by providing information that could be used in subsequent analyses?
+
+This analysis could be useful from several perspectives. 
+
+  1. If we are interested solely in predicting if an individual currently uses alcohol, this analysis showed that a LASSO model using one feature only - `impulsiveness_score`, an individual's measure of impulsivity - can predict alcohol use with approximately 85 percent accuracy. This knowledge in itself is useful in deciding which questions to ask: if we know impulsivity predicts alcohol use reasonably well, we can focus on that, even if only preliminarily.
+  
+    Predicting alcohol use as such could be useful from a mental health intervention perspective: if we have access to impulsiveness scores of a group of patients undergoing psychiatric treatment, which patients do we need to prioritize during follow-up for potential alcohol use? (This is obviously a much more complex question and would need to entail interactions with various mental health conditions of relevance.)
+  
+  2. If we don't have information on an individual's alcohol use, but we want to use alcohol use as a covariate or a predictor in a separate analysis, we could use this LASSO model to include information on an individual's predicted alcohol use. An example research question: Controlling for gender, age, and geographic area, does alcohol use increase risk of depression? Here, alcohol use would be predicted using our final model, instead of directly assessed.
